@@ -20,6 +20,7 @@ report = '100-ep Average: %.2f . Best 100-ep Average: %.2f . Average: ' \
 def print_report(rewards: List, episode: int):
     """Print rewards for current episode
     - Average for last 100 episodes
+
     - Best 100-episode average across all time
     - Average for all episodes across time
     """

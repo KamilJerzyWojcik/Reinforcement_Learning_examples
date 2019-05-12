@@ -8,17 +8,18 @@ import numpy as np
 import random
 import tensorflow as tf
 
-random.seed(0) # make result reproducible
+random.seed(0)  # make result reproducible
 np.random.seed(0)
 tf.set_random_seed(0)
 
 num_episodes = 4000
-discount_factor = 0.8
-learning_rate = 0.9
+discount_factor = 0.99
+learning_rate = 0.15
 report_interval = 500
 exploration_probability = lambda episode: 50. / (episode + 10)
 report = '100-ep Average: %.2f . Best 100-ep Average: %.2f . Average: ' \
          '%.2f (Episode %d)'
+
 
 def one_hot(i: int, n: int) -> np.array:
     """Implements one-hot encoding by selecting the ith standard basis vector"""
@@ -38,35 +39,75 @@ def print_report(rewards: List, episode: int):
                     ))
 
 
-
 def main():
-    env = gym.make('FrozenLake-v0') # create game
+    env = gym.make('FrozenLake-v0')
     env.seed(0)
     rewards = []
 
-    Q = np.zeros((env.observation_space.n, env.action_space.n)) # powierzchnia, l_akcji
-    for episode in range(1, num_episodes + 1):
-        state = env.reset()
-        episode_reward = 0
+    # 1. Setup Placeholders
+    n_observations, n_actions = env.observation_space.n, env.action_space.n
+    observations_time_ph = tf.placeholder(shape=[1, n_observations], dtype=tf.float32)
+    observations_time_plus_1_ph = tf.placeholder(shape=[1, n_observations], dtype=tf.float32)
+    actions_ph = tf.placeholder(shape=(), dtype=tf.int32)
+    rewards_ph = tf.placeholder(shape=(), dtype=tf.float32)
+    q_target_ph = tf.placeholder(shape=[1, n_actions], dtype=tf.float32)
 
-        while True:
-            noise = np.random.random((1, env.action_space.n)) / (episode ** 2)
-            action = np.argmax(Q[state, :] + noise)
-            state2, reward, done, _ = env.step(action)
-            Qtarget = reward + discount_factor * np.max(Q[state2, :])
-            Q[state, action] = (1 - learning_rate) * Q[state, action] + learning_rate * Qtarget
-            episode_reward += reward
-            state = state2
-            if episode == 4000:
-                print(env.render())
-                input()
-            if done:
-                rewards.append(episode_reward)
-                if episode % report_interval == 0:
-                    print_report(rewards, episode)
-                break
-    print_report(rewards, -1)
+    # 2. Setup computation graph
+    W = tf.Variable(tf.random_uniform([n_observations, n_actions], 0, 0.01))
+    q_current = tf.matmul(observations_time_ph, W)
+    q_target = tf.matmul(observations_time_plus_1_ph, W)
 
+    q_target_max = tf.reduce_max(q_target_ph, axis=1)
+    q_target_sa = rewards_ph + discount_factor * q_target_max
+    q_current_sa = q_current[0, actions_ph]
+    error = tf.reduce_sum(tf.square(q_target_sa - q_current_sa))
+    prediction_action_ph = tf.argmax(q_current, 1)
+
+    # 3. Setup optimization
+    trainer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
+    update_model = trainer.minimize(error)
+
+    with tf.Session() as session:
+        session.run(tf.global_variables_initializer())
+
+        for episode in range(1, num_episodes + 1):
+            observations_time = env.reset()
+            episode_reward = 0
+
+            while True:
+                # 4. Take step using best action or random action
+                observations_time_one_hot = one_hot(observations_time, n_observations)
+                action = session.run(prediction_action_ph, feed_dict={
+                            observations_time_ph: observations_time_one_hot
+                        })[0]
+                if np.random.rand(1) < exploration_probability(episode):
+                    action = env.action_space.sample()
+                observations_time_plus_1, reward, done, _ = env.step(action)
+
+                # 5. Train model
+                observations_time_plus_1_one_hot = one_hot(observations_time_plus_1,
+                                                           n_observations)
+                q_target_value = session.run(q_target, feed_dict={
+                    observations_time_plus_1_ph: observations_time_plus_1_one_hot
+                })
+
+                session.run(update_model, feed_dict={
+                    observations_time_ph: observations_time_one_hot,
+                    rewards_ph: reward,
+                    q_target_ph: q_target_value,
+                    actions_ph: action
+                })
+                episode_reward += reward
+                observations_time = observations_time_plus_1
+                if episode == 4000:
+                    print(env.render())
+                    input()
+                if done:
+                    rewards.append(episode_reward)
+                    if episode % report_interval == 0:
+                        print_report(rewards, episode)
+                    break
+        print_report(rewards, -1)
 
 
 if __name__ == '__main__':

@@ -1,0 +1,6 @@
+gym==0.12.1
+tensorflow==1.13.1
+tensorpack==0.9.4
+numpy==1.16.3
+scipy==1.2.1
+opencv-python==4.1.0.25
